@@ -1,0 +1,24 @@
+# Xcode
+ios/SDLPal/SDLPal.xcodeproj/xcuserdata/
+ios/SDLPal/SDLPal.xcodeproj/project.xcworkspace/xcuserdata/
+ios/SDLPal/*.xcworkspace/xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Build products
+/build/
+ios/SDLPal/build/
+
+# IDE
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Generated
+generated.h
+ios/SDLPal/scripts/gengitrev
+
+# Dependencies (CocoaPods)
+ios/SDLPal/Pods/
+ios/SDLPal/Podfile.lock

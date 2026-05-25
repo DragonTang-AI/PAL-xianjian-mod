@@ -1,0 +1,48 @@
+name: Build H5 Web Version
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.5
+
+      - name: Verify Emscripten
+        run: |
+          emcc --version
+          which emcc
+
+      - name: Build SDLPAL for Web
+        run: |
+          cd emscripten
+          make -j$(nproc) 2>&1
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          cp emscripten/sdlpal.{js,wasm} dist/
+          cp emscripten/sdlpal.html dist/
+          cp emscripten/main.js dist/
+          cp emscripten/jszip.min.js dist/
+          cp emscripten/icon.png dist/
+          echo "SDLPAL Mod v1.0 - Build $(date +%Y%m%d)" > dist/VERSION.txt
+          cd dist && zip -r ../sdlpal-web.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdlpal-web
+          path: dist/
+          retention-days: 30

@@ -1,229 +1,219 @@
-var strSyncingFs = 'Syncing FS...';
-var strDone = 'Done.';
-var strDeleting = 'Deleting...';
-var strNoSave = 'Cannot find saved games to download';
-var strNoData = 'Error: Game data not loaded!';
-var strInit = 'Initializing...';
-var strLoading = 'Loading';
-var strDelConfirm = "This will DELETE your game data and saved games stored in browser cache. Type 'YES' to continue.";
-var strTips = "Note: Avoid using uppercase letters in the configuration file when specifying paths and file names.";
+// SDLPAL Web - main.js
 
-var userLang = navigator.language || navigator.userLanguage;
-if (userLang === 'zh-CN' || userLang.startsWith('zh-Hans') ) {
-    strSyncingFs = '正在同步文件系统...';
-    strDone = '完成。';
-    strDeleting = '正在删除...';
-    strNoSave = '无法找到可下载的游戏存档！';
-    strNoData = '错误：游戏数据未上传。请先上传ZIP格式的游戏数据文件。';
-    strInit = '正在初始化...';
-    strLoading = '正在加载';
-    strDelConfirm = '此操作将删除您浏览器缓存中保存的数据文件及存档。请输入 "YES" 继续：';
-    strTips = "注意！配置文件内的路径和文件名 不能 包含大写字母。";
-} else if (userLang === 'zh-TW' || userLang.startsWith('zh-Hant') ) {
-    strSyncingFs = '正在同步檔案系統...';
-    strDone = '完成。';
-    strDeleting = '正在刪除...';
-    strNoSave = '無法找到可下載的遊戲記錄！';
-    strNoData = '錯誤：遊戲資料檔未上傳。請先上傳ZIP格式的遊戲資料檔。';
-    strInit = '正在初始化...';
-    strLoading = '正在加載';
-    strDelConfirm = '此操作將刪除您瀏覽器緩存中保存的遊戲資料檔及記錄。請輸入 "YES" 繼續：';
-    strTips = "請注意：在設定檔中指定路徑和檔案名稱時，請勿使用大寫字母。";
+// Progress UI helpers
+var progressFill, progressPct, statusText, progressDetail;
+var loadingScreen, mainMenu;
+
+function initUI() {
+    progressFill = document.getElementById('progressFill');
+    progressPct = document.getElementById('progressPct');
+    statusText = document.getElementById('statusText');
+    progressDetail = document.getElementById('progressDetail');
+    loadingScreen = document.getElementById('loadingScreen');
+    mainMenu = document.getElementById('mainMenu');
 }
 
+function setProgress(pct, text, detail) {
+    if (progressFill) progressFill.style.width = Math.min(pct, 100) + '%';
+    if (progressPct) progressPct.textContent = Math.round(pct) + '%';
+    if (statusText && text) statusText.textContent = text;
+    if (progressDetail && detail) progressDetail.textContent = detail;
+}
 
-var statusElement = document.getElementById('status');
-var progressElement = document.getElementById('progress');
-var spinnerElement = document.getElementById('spinner');
-var tipsElement;
-window.addEventListener('load', function () {
-    tipsElement = document.getElementById('tips');
-    tipsElement.textContent = strTips;
-})
+// Called when user clicks "开始游戏"
+function startGame() {
+    initUI();
+    if (!mainMenu || !loadingScreen) return;
+    mainMenu.style.display = 'none';
+    loadingScreen.classList.add('active');
+    setProgress(0, '正在加载游戏引擎...', '');
 
-var Module = {
+    // Dynamically load sdlpal.js (Emscripten WASM loader)
+    var script = document.createElement('script');
+    script.src = 'sdlpal.js';
+    script.onerror = function() { setProgress(0, '引擎加载失败，请刷新页面重试', ''); };
+    script.onload = function() { console.log('sdlpal.js loaded'); };
+    document.body.appendChild(script);
+}
+
+// Data loading after WASM is ready
+function runDataLoading() {
+    setProgress(30, '正在检查缓存...', '');
+    try { FS.mkdir('/data'); } catch(e) {}
+    FS.mount(IDBFS, {}, '/data');
+
+    // Sync from IndexedDB cache first
+    FS.syncfs(true, function(err) {
+        // Check if data is already cached
+        var hasData = false;
+        try { if (FS.stat('/data/fbp.mkf').size > 0) hasData = true; } catch(e) {}
+
+        if (hasData) {
+            setProgress(60, '使用缓存数据...', '');
+            setTimeout(function() {
+                setProgress(95, '正在同步...', '');
+                FS.syncfs(false, function() {
+                    setProgress(100, '正在启动游戏...', '');
+                    setTimeout(function() { launchGame(); }, 200);
+                });
+            }, 300);
+        } else {
+            // No cache - download data.zip
+            doDownloadAndExtract();
+        }
+    });
+}
+
+function doDownloadAndExtract() {
+    setProgress(35, '正在下载游戏数据...', '');
+
+    fetch('data.zip').then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var total = parseInt(r.headers.get('Content-Length') || '0');
+        var loaded = 0;
+        if (r.body) {
+            var reader = r.body.getReader();
+            var chunks = [];
+            function pump() {
+                return reader.read().then(function(result) {
+                    if (result.done) return new Blob(chunks);
+                    chunks.push(result.value);
+                    loaded += result.value.length;
+                    var pct = 35 + (loaded / total) * 20;
+                    setProgress(pct, '正在下载游戏数据...', (loaded / 1048576).toFixed(1) + 'MB / ' + (total / 1048576).toFixed(1) + 'MB');
+                    return pump();
+                });
+            }
+            return pump();
+        }
+        return r.blob();
+    }).then(function(blob) {
+        setProgress(57, '正在解压游戏资源...', '');
+        var zip = new JSZip();
+        return zip.loadAsync(blob).then(function(z) {
+            var entries = [];
+            z.forEach(function(path, entry) {
+                if (!entry.dir && !path.includes('._')) entries.push({path:path, entry:entry});
+            });
+            var done = 0;
+            function extractNext() {
+                if (done >= entries.length) return Promise.resolve();
+                var item = entries[done];
+                return item.entry.async('uint8array').then(function(arr) {
+                    try { FS.writeFile('/data/' + item.path.toLowerCase(), arr, {encoding:'binary'}); } catch(e) {}
+                    done++;
+                    var pct = 60 + (done / entries.length) * 33;
+                    setProgress(pct, '正在解压 ' + item.path.toLowerCase(), done + '/' + entries.length);
+                    return extractNext();
+                });
+            }
+            return extractNext();
+        });
+    }).then(function() {
+        setProgress(95, '正在写入缓存...', '');
+        return new Promise(function(resolve) { FS.syncfs(false, function() { resolve(); }); });
+    }).then(function() {
+        setProgress(100, '正在启动游戏...', '');
+        setTimeout(function() { launchGame(); }, 300);
+    }).catch(function(e) {
+        setProgress(0, '加载失败: ' + e.message, '');
+        console.error('Data load error:', e);
+    });
+}
+
+// The Module object for Emscripten
+window.Module = {
     preRun: [],
     postRun: [],
-    print: function(text) {
-        console.log(text);
-    },
-    printErr: function(text) {
-        console.error(text);
-    },
+    print: function(text) { console.log(text); },
+    printErr: function(text) { console.error(text); },
     canvas: (function() {
-        var canvas = document.getElementById('canvas');
-
-        // As a default initial behavior, pop up an alert when webgl context is lost. To make your
-        // application robust, you may want to override this behavior before shipping!
-        // See http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
-        canvas.addEventListener("webglcontextlost", function(e) { alert('WebGL context lost. You will need to reload the page.'); e.preventDefault(); }, false);
-
-        return canvas;
+        var c = document.getElementById('canvas');
+        if (c) {
+            c.addEventListener("webglcontextlost", function(e) { alert('WebGL context lost. Reload the page.'); e.preventDefault(); }, false);
+        }
+        return c;
     })(),
     setStatus: function(text) {
-        if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
-        if (text === Module.setStatus.last.text) return;
-	if (text === '' && Module.setStatus.last.text == strSyncingFs) return;
+        if (!text) return;
         var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
-        var now = Date.now();
-        if (m && now - Module.setStatus.last.time < 30) return; // if this is a progress update, skip it if too soon
-        Module.setStatus.last.time = now;
-        Module.setStatus.last.text = text;
         if (m) {
-            text = m[1];
-            progressElement.value = parseInt(m[2])*100;
-            progressElement.max = parseInt(m[4])*100;
-            progressElement.hidden = false;
-            spinnerElement.hidden = false;
-        } else {
-            progressElement.value = null;
-            progressElement.max = null;
-            progressElement.hidden = true;
-            if (!text) spinnerElement.style.display = 'none';
+            setProgress(parseInt(m[2]) / parseInt(m[4]) * 30, m[1], m[2] + '/' + m[4]);
         }
-        statusElement.innerHTML = text;
     },
     totalDependencies: 0,
     monitorRunDependencies: function(left) {
         this.totalDependencies = Math.max(this.totalDependencies, left);
-        Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+        if (left) {
+            var loaded = this.totalDependencies - left;
+            setProgress(loaded / this.totalDependencies * 30, '引擎加载中', loaded + '/' + this.totalDependencies);
+        }
     },
-    onRuntimeInitialized:function() {
-        onRuntimeInitialized();
+    onRuntimeInitialized: function() {
+        runDataLoading();
     }
 };
 
-function onRuntimeInitialized() {
-    try {
-	FS.mkdir('/data');
-    } catch (e) {
-    }
-    FS.mount(IDBFS, {}, '/data');
-    Module.setStatus(strSyncingFs);
-    spinnerElement.style.display = 'inline-block';
-    FS.syncfs(true, function (err) {
-	spinnerElement.style.display = 'none';
-        Module.setStatus(strDone);
-    });
-}
-
-function loadZip() {
-    var fileBtn = document.getElementById('btnLoadZip');
-    Module.setStatus(strLoading + ' ' + fileBtn.files[0].name + '...');
-    spinnerElement.style.display = 'inline-block';
-
-    var fileInput = document.getElementById("btnLoadZip");
-    var zip = new JSZip();
-    var file = fileInput.files[0];
-
-    zip.loadAsync(file).then(function(z) {
-        var promises = [];
-	z.forEach(function(relativePath, zipEntry) {
-        if (relativePath.includes('._')) {
-            Module.print("ignoring file "+relativePath);
-            return;
-        }
-	    if (zipEntry.dir) {
-		var pathArr = relativePath.split('/');
-		var currPath = '/data';
-		for (var i = 0; i < pathArr.length; i++) {
-		    currPath += '/';
-		    currPath += pathArr[i];
-		    try { 
-			FS.mkdir(currPath.toLowerCase(), 0777);
-		    } catch (e) {
-		    }
-		}
-	    } else {
-		promises.push(zipEntry.async('uint8array').then(function(arr) {
-		    FS.writeFile('/data/' + relativePath.toLowerCase(), arr, {encoding: 'binary'});
-		}));
-        }
-    });
-    Promise.all(promises).then(function() {
-	Module.setStatus(strSyncingFs);
-	FS.syncfs(function (err) {
-	    Module.setStatus(strDone);
-	    spinnerElement.style.display = 'none';
-	});
-    });
-    });
-}
-
-function clearData() {
-    if (window.prompt(strDelConfirm) === "YES") {
-        var doDelete = function(path) {
-            Object.keys(FS.lookupPath(path).node.contents).forEach(element => {
-                var stat = FS.stat(path + '/' + element);
-                if (stat.mode & 0040000) {
-                    doDelete(path + '/' + element);
-                    FS.rmdir(path + '/' + element);
-                } else {
-                    FS.unlink(path + '/' + element);
-                }
-            });
-        };
-        Module.setStatus(strDeleting);
-        spinnerElement.style.display = 'inline-block';
-        doDelete('/data');
-        Module.setStatus(strSyncingFs);
-        FS.syncfs(false, function (err) {
-            spinnerElement.style.display = 'none';
-            Module.setStatus(strDone);
-        });
-    }
-}
-
-function downloadSaves() {
-    var zip = new JSZip();
-    var hasData = false;
-    Object.keys(FS.lookupPath('/data').node.contents).forEach(element => {
-        if (element.endsWith('.rpg')) {
-            var array = FS.readFile('/data/' + element);
-            zip.file(element, array);
-            hasData = true;
-        }
-    });
-    if (!hasData) {
-        window.alert(strNoSave);
+function launchGame() {
+    var ok = false;
+    try { if (FS.stat('/data/fbp.mkf').size > 0) ok = true; } catch(e) {}
+    if (!ok) {
+        setProgress(0, '游戏数据加载失败', '');
         return;
     }
-    zip.generateAsync({type:"base64"}).then(function (base64) {
-        window.location = "data:application/zip;base64," + base64;
-    }, function (err) {
-        Module.printErr(err);
+    setProgress(100, '进入游戏中...', '');
+    loadingScreen.classList.remove('active');
+    mainMenu.style.display = 'none';
+
+    // Show virtual controller on touch devices
+    initVirtualController();
+
+    var func = Module.cwrap('EMSCRIPTEN_main', 'number', ['number', 'number'], {async:true});
+    func(0, 0);
+}
+
+// Virtual Controller
+function initVirtualController() {
+    var vc = document.getElementById('vcontroller');
+    if (!vc) return;
+
+    // Only show on touch devices
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        vc.classList.add('active');
+    }
+
+    // Touch event handling for each button
+    var buttons = vc.querySelectorAll('.ctrl-btn');
+    buttons.forEach(function(btn) {
+        var key = btn.getAttribute('data-key');
+        if (!key) return;
+
+        function onStart(e) {
+            e.preventDefault();
+            btn.classList.add('pressed');
+            dispatchKey(key, true);
+        }
+        function onEnd(e) {
+            e.preventDefault();
+            btn.classList.remove('pressed');
+            dispatchKey(key, false);
+        }
+
+        btn.addEventListener('touchstart', onStart, {passive:false});
+        btn.addEventListener('touchend', onEnd, {passive:false});
+        btn.addEventListener('touchcancel', onEnd, {passive:false});
+        btn.addEventListener('mousedown', onStart);
+        btn.addEventListener('mouseup', onEnd);
+        btn.addEventListener('mouseleave', onEnd);
     });
 }
 
-async function runGame() {
-    mainFunc = Module.cwrap('EMSCRIPTEN_main', 'number', ['number', 'number'], {async:true});
-    mainFunc(0, 0);
+function dispatchKey(key, isDown) {
+    var event = new KeyboardEvent(isDown ? 'keydown' : 'keyup', {
+        key: key,
+        code: key,
+        bubbles: true,
+        cancelable: true
+    });
+    document.dispatchEvent(event);
 }
-
-function launch() {
-    var checkFile = false;
-    try {
-	if (FS.stat('/data/fbp.mkf').size > 0) {
-	    checkFile = true;
-	}
-    } catch (e) {
-    }
-    if (!checkFile) {
-	Module.setStatus(strNoData);
-	return;
-    }
-    document.getElementById('btnLaunch').style = "display:none";
-    document.getElementById('btnLoadZip').style = "display:none";
-    document.getElementById('btnDeleteData').style = "display:none";
-    tipsElement.style = "display:none";
-    runGame();
-}
-
-Module.setStatus(strInit);
-window.onerror = function(event) {
-    Module.setStatus('Exception thrown, see JavaScript console');
-    spinnerElement.style.display = 'none';
-    Module.setStatus = function(text) {
-        if (text) Module.printErr('[post-exception status] ' + text);
-    };
-};

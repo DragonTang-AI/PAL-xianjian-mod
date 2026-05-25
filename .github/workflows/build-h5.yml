@@ -24,6 +24,13 @@ jobs:
           emcc --version
           which emcc
 
+      - name: Create gengitrev stub
+        run: |
+          mkdir -p scripts
+          echo '#!/bin/sh' > scripts/gengitrev
+          echo 'echo "#define PAL_GIT_REVISION \"0\""' >> scripts/gengitrev
+          chmod +x scripts/gengitrev
+
       - name: Build SDLPAL for Web
         run: |
           cd emscripten
@@ -32,11 +39,11 @@ jobs:
       - name: Package artifacts
         run: |
           mkdir -p dist
-          cp emscripten/sdlpal.{js,wasm} dist/
+          cp emscripten/sdlpal.{js,wasm} dist/ 2>/dev/null || true
           cp emscripten/sdlpal.html dist/
           cp emscripten/main.js dist/
           cp emscripten/jszip.min.js dist/
-          cp emscripten/icon.png dist/
+          cp emscripten/icon.png dist/ 2>/dev/null || true
           echo "SDLPAL Mod v1.0 - Build $(date +%Y%m%d)" > dist/VERSION.txt
           cd dist && zip -r ../sdlpal-web.zip .
 

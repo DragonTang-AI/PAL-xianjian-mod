@@ -19,9 +19,9 @@ OBJFILES = $(CFILES:.c=$(INTER).o) $(CPPFILES:.cpp=$(INTER).o)
 DEPFILES = $(OBJFILES:.o=.d)
 SDL_CONFIG = pkg-config sdl3
 
-override CFLAGS = `$(SDL_CONFIG) --cflags` -gsource-map -Wall -O2 -fno-strict-aliasing -I. -I.. -DUSE_SDL3=1 -I../sdl_compat -I../timidity -DPAL_HAS_PLATFORM_SPECIFIC_UTILS $(DEPFLAGS) $(EMPORTS) $(GENERATED)
+override CFLAGS = -s USE_SDL=2 -I. -I.. -I../sdl_compat -I../timidity -gsource-map -Wall -O2 -fno-strict-aliasing -DPAL_HAS_PLATFORM_SPECIFIC_UTILS $(DEPFLAGS) $(EMPORTS) $(GENERATED)
 CPPFLAGS = $(CFLAGS) -std=c++11
-override LDFLAGS += `$(SDL_CONFIG) --libs` -gsource-map -O2 $(EMPORTS) --emrun -lidbfs.js -s ASYNCIFY=1 -sEXIT_RUNTIME=1 \
+override LDFLAGS += -s USE_SDL=2 -gsource-map -O2 $(EMPORTS) --emrun -lidbfs.js -s ASYNCIFY=1 -sEXIT_RUNTIME=1 \
 	-s EXPORTED_FUNCTIONS="['_EMSCRIPTEN_main']" -s 'EXPORTED_RUNTIME_METHODS=["cwrap"]' -sMAX_WEBGL_VERSION=2 -sFULL_ES3 -s TOTAL_STACK=5242880
 
 POSTCOMPILE = @mv -f $*$(INTER).Td $*$(INTER).d && touch $@

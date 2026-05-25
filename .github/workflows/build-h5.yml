@@ -31,6 +31,12 @@ jobs:
           echo 'echo "#define PAL_GIT_REVISION \"0\""' >> scripts/gengitrev
           chmod +x scripts/gengitrev
 
+      - name: Create generated.h
+        run: |
+          echo '#define PAL_GIT_REVISION "0"' > generated.h
+          echo "created generated.h"
+          cat generated.h
+
       - name: Build SDLPAL for Web
         run: |
           cd emscripten

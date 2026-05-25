@@ -9,7 +9,7 @@ INTER=.emscripten
 
 HOST =
 
-GENERATED = -DPAL_HAS_GIT_REVISION $(shell ../scripts/gengitrev)
+GENERATED = -DPAL_HAS_GIT_REVISION
 
 DEPFLAGS = -MT $@ -MMD -MP -MF $*$(INTER).Td
 
@@ -17,7 +17,6 @@ CFILES = $(wildcard ../sdl_compat/*.c) $(wildcard ../adplug/*.c) $(wildcard ../l
 CPPFILES = $(wildcard ../adplug/*.cpp) $(wildcard ../*.cpp) emscripten_adapter.cpp
 OBJFILES = $(CFILES:.c=$(INTER).o) $(CPPFILES:.cpp=$(INTER).o)
 DEPFILES = $(OBJFILES:.o=.d)
-SDL_CONFIG = pkg-config sdl3
 
 override CFLAGS = -s USE_SDL=2 -I. -I.. -I../sdl_compat -I../timidity -gsource-map -Wall -O2 -fno-strict-aliasing -DPAL_HAS_PLATFORM_SPECIFIC_UTILS $(DEPFLAGS) $(EMPORTS) $(GENERATED)
 CPPFLAGS = $(CFLAGS) -std=c++11
